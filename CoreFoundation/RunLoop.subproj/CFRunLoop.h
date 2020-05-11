@@ -21,6 +21,7 @@
 CF_IMPLICIT_BRIDGING_ENABLED
 CF_EXTERN_C_BEGIN
 
+// 定义 各种类型
 typedef CFStringRef CFRunLoopMode CF_EXTENSIBLE_STRING_ENUM;
 
 typedef struct CF_BRIDGED_MUTABLE_TYPE(id) __CFRunLoop * CFRunLoopRef;
@@ -32,47 +33,66 @@ typedef struct CF_BRIDGED_MUTABLE_TYPE(id) __CFRunLoopObserver * CFRunLoopObserv
 typedef struct CF_BRIDGED_MUTABLE_TYPE(NSTimer) __CFRunLoopTimer * CFRunLoopTimerRef;
 
 /* Reasons for CFRunLoopRunInMode() to Return */
+
+// CFRunLoopInMode() 返回的原因
 typedef CF_ENUM(SInt32, CFRunLoopRunResult) {
-    kCFRunLoopRunFinished = 1,
-    kCFRunLoopRunStopped = 2,
-    kCFRunLoopRunTimedOut = 3,
-    kCFRunLoopRunHandledSource = 4
+    kCFRunLoopRunFinished = 1,              //runloop中已经没有sources和timers
+    kCFRunLoopRunStopped = 2,           //runloop通过 CFRunLoopStop(_:)方法停止
+    kCFRunLoopRunTimedOut = 3,              //runloop设置的时间已到
+    kCFRunLoopRunHandledSource = 4      // 当returnAfterSourceHandled值为ture时，一个source被执行完
 };
 
 /* Run Loop Observer Activities */
 typedef CF_OPTIONS(CFOptionFlags, CFRunLoopActivity) {
-    kCFRunLoopEntry = (1UL << 0),
-    kCFRunLoopBeforeTimers = (1UL << 1),
-    kCFRunLoopBeforeSources = (1UL << 2),
-    kCFRunLoopBeforeWaiting = (1UL << 5),
-    kCFRunLoopAfterWaiting = (1UL << 6),
-    kCFRunLoopExit = (1UL << 7),
+    kCFRunLoopEntry = (1UL << 0),           // 即将进入loop
+    kCFRunLoopBeforeTimers = (1UL << 1),    // 即将处理Timer
+    kCFRunLoopBeforeSources = (1UL << 2),   // 即将处理source
+    kCFRunLoopBeforeWaiting = (1UL << 5),   // 即将进入休眠
+    kCFRunLoopAfterWaiting = (1UL << 6),    // 从休眠中唤醒
+    kCFRunLoopExit = (1UL << 7),            // 即将推出rloop
     kCFRunLoopAllActivities = 0x0FFFFFFFU
 };
 
-CF_EXPORT const CFRunLoopMode kCFRunLoopDefaultMode;
-CF_EXPORT const CFRunLoopMode kCFRunLoopCommonModes;
-
+# pragma mark - runloop的mode
+// extern
+CF_EXPORT const CFRunLoopMode kCFRunLoopDefaultMode;                // C 语言此处只给出了两种模式   
+CF_EXPORT const CFRunLoopMode kCFRunLoopCommonModes; //虚拟的   包括：kCFRunLoopDefaultMode + UITrackingRunLoopMode
+// 获取runloop的唯一ID(此处ID 未公开，但是可以拿到)
 CF_EXPORT CFTypeID CFRunLoopGetTypeID(void);
 
+
+// 获取runloop
 CF_EXPORT CFRunLoopRef CFRunLoopGetCurrent(void);
 CF_EXPORT CFRunLoopRef CFRunLoopGetMain(void);
 
+// 当前正在执行的 mode
 CF_EXPORT CFRunLoopMode CFRunLoopCopyCurrentMode(CFRunLoopRef rl);
 
+// 获取runloop支持的所有mode
 CF_EXPORT CFArrayRef CFRunLoopCopyAllModes(CFRunLoopRef rl);
 
+// 添加 Common 模式, 此处操作挺多的，详细看源码
 CF_EXPORT void CFRunLoopAddCommonMode(CFRunLoopRef rl, CFRunLoopMode mode);
 
 CF_EXPORT CFAbsoluteTime CFRunLoopGetNextTimerFireDate(CFRunLoopRef rl, CFRunLoopMode mode);
 
+
+
+// Runloop的管理
 CF_EXPORT void CFRunLoopRun(void);
 CF_EXPORT CFRunLoopRunResult CFRunLoopRunInMode(CFRunLoopMode mode, CFTimeInterval seconds, Boolean returnAfterSourceHandled);
+//
 CF_EXPORT Boolean CFRunLoopIsWaiting(CFRunLoopRef rl);
 CF_EXPORT void CFRunLoopWakeUp(CFRunLoopRef rl);
+// stop 终止： 这里有点意思， 它只是终止了 currentMode， 并不是停止整个runloop， 在currentMode 终止成功后， 会再次尝试唤醒RunLoop（调用CFRunLoopWakeUp）
 CF_EXPORT void CFRunLoopStop(CFRunLoopRef rl);
 
+//                                  RunLoop 方法      ·
+
+
 #if __BLOCKS__
+// 向特定的模式中添加 block
+// 该方式不会直接唤醒 runloop。在下次被唤醒时执行 
 CF_EXPORT void CFRunLoopPerformBlock(CFRunLoopRef rl, CFTypeRef mode, void (^block)(void)) API_AVAILABLE(macos(10.6), ios(4.0), watchos(2.0), tvos(9.0)); 
 #endif
 
@@ -88,6 +108,9 @@ CF_EXPORT Boolean CFRunLoopContainsTimer(CFRunLoopRef rl, CFRunLoopTimerRef time
 CF_EXPORT void CFRunLoopAddTimer(CFRunLoopRef rl, CFRunLoopTimerRef timer, CFRunLoopMode mode);
 CF_EXPORT void CFRunLoopRemoveTimer(CFRunLoopRef rl, CFRunLoopTimerRef timer, CFRunLoopMode mode);
 
+//                                                      Source
+
+// sourceo 源结构体定义
 typedef struct {
     CFIndex	version;
     void *	info;
@@ -101,6 +124,7 @@ typedef struct {
     void	(*perform)(void *info);
 } CFRunLoopSourceContext;
 
+// Source 1 结构体di9ngyi
 typedef struct {
     CFIndex	version;
     void *	info;
@@ -110,7 +134,7 @@ typedef struct {
     Boolean	(*equal)(const void *info1, const void *info2);
     CFHashCode	(*hash)(const void *info);
 #if (TARGET_OS_MAC && !(TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)) || (TARGET_OS_EMBEDDED || TARGET_OS_IPHONE)
-    mach_port_t	(*getPort)(void *info);
+    mach_port_t	(*getPort)(void *info);             // 指定来源 port
     void *	(*perform)(void *msg, CFIndex size, CFAllocatorRef allocator, void *info);
 #else
     void *	(*getPort)(void *info);
@@ -128,6 +152,9 @@ CF_EXPORT Boolean CFRunLoopSourceIsValid(CFRunLoopSourceRef source);
 CF_EXPORT void CFRunLoopSourceGetContext(CFRunLoopSourceRef source, CFRunLoopSourceContext *context);
 CF_EXPORT void CFRunLoopSourceSignal(CFRunLoopSourceRef source);
 
+
+//                                                              Observer
+// Observer 结构体定义
 typedef struct {
     CFIndex	version;
     void *	info;
@@ -152,6 +179,9 @@ CF_EXPORT void CFRunLoopObserverInvalidate(CFRunLoopObserverRef observer);
 CF_EXPORT Boolean CFRunLoopObserverIsValid(CFRunLoopObserverRef observer);
 CF_EXPORT void CFRunLoopObserverGetContext(CFRunLoopObserverRef observer, CFRunLoopObserverContext *context);
 
+
+///                                                                                                     Timer 部分
+// timer 结构体定义
 typedef struct {
     CFIndex	version;
     void *	info;

@@ -31,6 +31,7 @@ extension RunLoop {
     }
 }
 
+// RunLoop 暴露给外界的只有两种模式，没有那个 UITracking 模式
 extension RunLoop.Mode {
     public static let `default`: RunLoop.Mode = RunLoop.Mode("kCFRunLoopDefaultMode")
     public static let common: RunLoop.Mode = RunLoop.Mode("kCFRunLoopCommonModes")
@@ -52,6 +53,10 @@ internal func _NSRunLoopNew(_ cf: CFRunLoop) -> Unmanaged<AnyObject> {
     return unsafeBitCast(rl, to: Unmanaged<AnyObject>.self) // this retain is balanced on the other side of the CF fence
 }
 
+/**
+ runLoop 对象，在 Foundation 层 ， 是一个 NSObject 对象， 其内部还是引用的 CFRunLoop
+ 
+ */
 open class RunLoop: NSObject {
     internal var _cfRunLoop : CFRunLoop!
     internal static var _mainRunLoop : RunLoop = {

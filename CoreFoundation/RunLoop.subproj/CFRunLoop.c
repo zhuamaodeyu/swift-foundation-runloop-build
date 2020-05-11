@@ -780,7 +780,7 @@ static void __CFRunLoopModeDeallocate(CFTypeRef cf) {
 // block 结构体
 struct _block_item {
     struct _block_item *_next;
-    CFTypeRef _mode;	// CFString or CFSet
+    CFTypeRef _mode;	// CFString or CFSet    // mode 标记(名字)
     void (^_block)(void);
 };
 
@@ -1933,7 +1933,16 @@ static void __CFRUNLOOP_IS_CALLING_OUT_TO_A_BLOCK__(void (^block)(void)) {
     __asm __volatile__(""); // thwart tail-call optimization
 }
 
-// block 操作(block 是个数组)
+// block调用
+/**
+    1. 判断有没有block
+    2. 判断mode是否正确(根据是否有名字)
+    3. 拿到block的头结点和尾结点
+    4. 循环遍历
+        *
+ 
+ */
+// TODO: 所有的block都是存放在 runloop上的， 只有调用的时候，是通过 mode 来查找到是当前 mode上的block，才会调用
 static Boolean __CFRunLoopDoBlocks(CFRunLoopRef rl, CFRunLoopModeRef rlm) { // Call with rl and rlm locked
     
     cf_trace(KDEBUG_EVENT_CFRL_IS_DOING_BLOCKS | DBG_FUNC_START, rl, rlm, 0, 0);
@@ -1943,45 +1952,69 @@ static Boolean __CFRunLoopDoBlocks(CFRunLoopRef rl, CFRunLoopModeRef rlm) { // C
     Boolean did = false;
     struct _block_item *head = rl->_blocks_head;
     struct _block_item *tail = rl->_blocks_tail;
+    /**
+        
+     */
+    // TODO:此处为什么要将head 和 tail 变为 NULL 呢？
+    /**
+        1. 当前调用过程中，可能系统还会添加新的block块， 但是， block块并不会唤醒 runloop。 其职能在下一次的 唤醒时调用
+        所以此处将其变为 NULL ， 这样新添加的 和现在正在调用的就没有关系（不然，循环遍历链表，系统一直添加，这边一直遍历，什么时候是个头？）
+            当整个调用过程结束后， 将未调用的那些又重新拼接到节点中去
+     */
     rl->_blocks_head = NULL;
     rl->_blocks_tail = NULL;
     CFSetRef commonModes = rl->_commonModes;
     CFStringRef curMode = rlm->_name;
     __CFRunLoopModeUnlock(rlm);
     __CFRunLoopUnlock(rl);
+    //
     struct _block_item *prev = NULL;
     struct _block_item *item = head;
     while (item) {
         struct _block_item *curr = item;
         item = item->_next;
-	Boolean doit = false;
-	if (CFStringGetTypeID() == CFGetTypeID(curr->_mode)) {
-	    doit = CFEqual(curr->_mode, curMode) || (CFEqual(curr->_mode, kCFRunLoopCommonModes) && CFSetContainsValue(commonModes, curMode));
+        Boolean doit = false;
+        // 此处给定的标记
+        if (CFStringGetTypeID() == CFGetTypeID(curr->_mode)) {
+            // current mode == 传入的mode
+            // 传入的mode 在 common mode 数组中
+            doit = CFEqual(curr->_mode, curMode) || (CFEqual(curr->_mode, kCFRunLoopCommonModes) && CFSetContainsValue(commonModes, curMode));
         } else {
-	    doit = CFSetContainsValue((CFSetRef)curr->_mode, curMode) || (CFSetContainsValue((CFSetRef)curr->_mode, kCFRunLoopCommonModes) && CFSetContainsValue(commonModes, curMode));
-	}
-	if (!doit) prev = curr;
-	if (doit) {
-	    if (prev) prev->_next = item;
-	    if (curr == head) head = item;
-	    if (curr == tail) tail = prev;
-	    void (^block)(void) = curr->_block;
-            CFRelease(curr->_mode);
-            free(curr);
-	    if (doit) {
-                cf_trace(KDEBUG_EVENT_CFRL_IS_CALLING_BLOCK | DBG_FUNC_START, rl, rlm, block, 0);
-                __CFRUNLOOP_IS_CALLING_OUT_TO_A_BLOCK__(block);
-                cf_trace(KDEBUG_EVENT_CFRL_IS_CALLING_BLOCK | DBG_FUNC_END, rl, rlm, block, 0);
-	        did = true;
-	    }
-            Block_release(block); // do this before relocking to prevent deadlocks where some yahoo wants to run the run loop reentrantly from their dealloc
-	}
+            // 当前block 的 _mode属性 包含 传入 的 mode 名字
+            // 传入的是 common mode
+            // 包含在 common modes 数组中
+            doit = CFSetContainsValue((CFSetRef)curr->_mode, curMode) || (CFSetContainsValue((CFSetRef)curr->_mode, kCFRunLoopCommonModes) && CFSetContainsValue(commonModes, curMode));
+        }
+        // TODO: 此处需要注意！！！！！！！
+        
+        // 如果以上条件都不满足，那么次 block 结构体对象与当前  传入的 mode 没有关系， 直接下一步了
+        if (!doit) prev = curr;
+        if (doit) {
+            // 条件判断成功，这里准备调用了
+            if (prev) prev->_next = item;
+            if (curr == head) head = item;
+            if (curr == tail) tail = prev;
+            void (^block)(void) = curr->_block;
+                CFRelease(curr->_mode);
+                free(curr);
+            if (doit) {
+                    cf_trace(KDEBUG_EVENT_CFRL_IS_CALLING_BLOCK | DBG_FUNC_START, rl, rlm, block, 0);
+                    // 调用block
+                    __CFRUNLOOP_IS_CALLING_OUT_TO_A_BLOCK__(block);
+                    cf_trace(KDEBUG_EVENT_CFRL_IS_CALLING_BLOCK | DBG_FUNC_END, rl, rlm, block, 0);
+                did = true;
+            }
+                Block_release(block); // do this before relocking to prevent deadlocks where some yahoo wants to run the run loop reentrantly from their dealloc
+        }
     }
+    
+    // 循环调用完毕
     __CFRunLoopLock(rl);
     __CFRunLoopModeLock(rlm);
+    // 将 head 和 tail 又复原
     if (head) {
-	tail->_next = rl->_blocks_head;
-	rl->_blocks_head = head;
+        tail->_next = rl->_blocks_head;
+        rl->_blocks_head = head;
         if (!rl->_blocks_tail) rl->_blocks_tail = tail;
     }
     
